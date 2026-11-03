@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: System packages
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates python3 python3-venv python3-pip \
+            tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng fonts-dejavu-core
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -e '.[dev]'
+      - name: Doctor
+        run: .venv/bin/bill2sheet doctor
+      - name: Tests
+        run: .venv/bin/pytest -q

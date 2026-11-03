@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# never commit receipts or ledgers
+*.xlsx
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.webp
+*.tif
+*.tiff
+*.bmp

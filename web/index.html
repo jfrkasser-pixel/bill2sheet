@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Picts to Ledger — Billable Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+  :root{
+    --paper:#F3EFE6; --paper-dark:#E7E0CF; --ink:#1E2A26; --ink-soft:#556059;
+    --brass:#A9772F; --brass-dark:#8C611F; --line:#CFC6AE; --good:#3F6B4E;
+    --bad:#A23E2E; --white:#FFFDF8;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);background-image:repeating-linear-gradient(180deg, transparent, transparent 27px, rgba(30,42,38,0.035) 28px);color:var(--ink);font-family:'Inter', sans-serif;min-height:100vh;}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 18px 90px;}
+  header{margin-bottom:24px;}
+  .eyebrow{font-family:'IBM Plex Mono', monospace;font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:var(--brass-dark);margin-bottom:8px;}
+  h1{font-family:'Fraunces', serif;font-weight:600;font-size:32px;line-height:1.05;margin:0 0 8px;letter-spacing:-0.01em;}
+  .sub{color:var(--ink-soft);font-size:14px;line-height:1.5;max-width:58ch;}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:2px;}
+  .dropzone{padding:26px 20px;text-align:center;border:1.5px dashed var(--line);margin:0 0 16px;border-radius:2px;background:var(--white);cursor:pointer;transition:border-color .15s ease, background .15s ease;}
+  .dropzone:hover{border-color:var(--brass);}
+  .dropzone.drag{border-color:var(--brass);background:#FBF7ED;}
+  .dz-icon{font-size:24px;margin-bottom:8px;}
+  .dz-title{font-weight:600;font-size:15px;margin-bottom:4px;}
+  .dz-sub{font-size:12.5px;color:var(--ink-soft);}
+  input[type=file]{display:none;}
+  .btn{font-family:'Inter', sans-serif;font-weight:600;font-size:13.5px;padding:10px 16px;border-radius:2px;border:1px solid var(--brass);background:var(--brass);color:var(--white);cursor:pointer;letter-spacing:0.01em;}
+  .btn:hover{background:var(--brass-dark);border-color:var(--brass-dark);}
+  .btn:disabled{background:#C8C0AC;border-color:#C8C0AC;cursor:not-allowed;}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--line);}
+  .btn.ghost:hover{border-color:var(--ink-soft);}
+  .toolbar{display:flex;gap:10px;align-items:center;margin:16px 0 6px;flex-wrap:wrap;}
+  .entries{display:flex;flex-direction:column;gap:12px;margin-top:16px;}
+  .entry{border:1px solid var(--line);background:var(--white);display:grid;grid-template-columns:76px 1fr;}
+  .entry.billable{border-left:3px solid var(--good);}
+  .entry.nonbillable{border-left:3px solid var(--ink-soft);}
+  .entry-thumb{background:var(--paper-dark);display:flex;align-items:center;justify-content:center;overflow:hidden;border-right:1px solid var(--line);}
+  .entry-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .entry-body{padding:11px 13px;min-width:0;}
+  .entry-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;}
+  .entry-name{font-family:'IBM Plex Mono', monospace;font-size:11px;color:var(--ink-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .entry-status{font-family:'IBM Plex Mono', monospace;font-size:11px;letter-spacing:0.04em;flex-shrink:0;}
+  .entry-status.pending{color:var(--ink-soft);}
+  .entry-status.working{color:var(--brass-dark);}
+  .entry-status.done{color:var(--good);}
+  .entry-status.err{color:var(--bad);}
+  .field-row{display:flex;gap:8px;margin-bottom:7px;flex-wrap:wrap;}
+  .field{flex:1;min-width:110px;}
+  .field label{display:block;font-family:'IBM Plex Mono', monospace;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:3px;}
+  .field input, .field select{width:100%;font-family:'Inter', sans-serif;font-size:13.5px;padding:7px 9px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:1px;}
+  .field input:focus, .field select:focus{outline:2px solid var(--brass);outline-offset:-1px;}
+  .field.total input{font-family:'IBM Plex Mono', monospace;}
+  .field.billable select{font-family:'IBM Plex Mono', monospace;font-weight:600;}
+  .field.billable select.billable-yes{color:var(--good);}
+  .field.billable select.billable-no{color:var(--ink-soft);}
+  .progress-bar{height:2px;background:var(--paper-dark);margin-bottom:8px;overflow:hidden;}
+  .progress-fill{height:100%;background:var(--brass);width:0%;transition:width .2s ease;}
+  .raw-toggle{background:none;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono', monospace;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;margin-right:14px;}
+  .raw-toggle:hover{color:var(--brass-dark);}
+  .entry-remove{background:none;border:none;color:var(--ink-soft);font-family:'IBM Plex Mono', monospace;font-size:10.5px;cursor:pointer;padding:0;text-decoration:underline;}
+  .entry-remove:hover{color:var(--bad);}
+  .raw-text{width:100%;min-height:60px;margin-top:8px;resize:vertical;font-family:'IBM Plex Mono', monospace;font-size:11.5px;line-height:1.5;border:1px solid var(--line);background:var(--paper);padding:7px 8px;color:var(--ink-soft);}
+  .empty{text-align:center;padding:40px 20px;color:var(--ink-soft);font-size:13.5px;}
+  .summary{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px;}
+  .summary .tile{flex:1;min-width:150px;border:1px solid var(--line);background:var(--white);padding:12px 14px;}
+  .summary .tile .label{font-family:'IBM Plex Mono', monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:4px;}
+  .summary .tile .value{font-family:'Fraunces', serif;font-size:19px;font-weight:600;line-height:1.25;word-break:break-word;}
+  .summary .tile.billable .value{color:var(--good);}
+  .summary .tile.nonbillable .value{color:var(--ink-soft);}
+  footer.actions{position:sticky;bottom:0;margin-top:22px;background:linear-gradient(180deg, transparent, var(--paper) 22%);padding-top:18px;}
+  .actions-inner{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--white);border:1px solid var(--line);padding:14px 16px;flex-wrap:wrap;}
+  .count-label{font-family:'IBM Plex Mono', monospace;font-size:12px;color:var(--ink-soft);}
+  .currency-toggle{display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono', monospace;font-size:12px;color:var(--ink-soft);}
+  .currency-toggle select{font-family:'IBM Plex Mono', monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);background:var(--white);border-radius:2px;}
+  .signature{font-family:'IBM Plex Mono', monospace;font-size:10.5px;color:var(--ink-soft);text-align:center;margin-top:32px;letter-spacing:0.06em;}
+
+  #settingsModal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(30,42,38,0.45);z-index:1000;align-items:center;justify-content:center;padding:20px;}
+  #settingsModal > div{background:var(--white);max-width:420px;width:100%;padding:22px 24px;border-radius:2px;border:1px solid var(--line);max-height:85vh;overflow-y:auto;}
+  #settingsModal h2{font-family:'Fraunces',serif;font-weight:600;font-size:20px;margin:0 0 6px;}
+  #settingsModal p{font-size:12.5px;color:var(--ink-soft);line-height:1.5;margin:0 0 14px;}
+  #settingsModal label{display:block;margin:14px 0 6px;font-family:'IBM Plex Mono', monospace;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--ink-soft);}
+  #settingsModal select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'Inter', sans-serif;}
+  .modal-actions{display:flex;gap:10px;margin-top:20px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Photos → OCR → Billable report</div>
+    <h1>Picts to Ledger</h1>
+    <p class="sub">Pick receipt or invoice photos from your gallery. OCR reads vendor, date, description, category, total and currency, detects the receipt's language, and can translate it. Add a Claude API key in Settings (⚙️) to let AI clean up misread fields.</p>
+  </header>
+
+  <div class="card" id="restoreBanner" style="display:none;padding:14px 16px;margin-bottom:16px;">
+    <div style="font-size:13.5px;margin-bottom:8px;" id="restoreText"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn" id="restoreBtn">Restore saved rows</button>
+      <button class="btn ghost" id="discardBtn">Discard</button>
+    </div>
+  </div>
+
+  <div class="dropzone card" id="dropzone">
+    <div class="dz-icon">🧾</div>
+    <div class="dz-title">Choose photos</div>
+    <div class="dz-sub">Receipts, invoices, anything with a total on it</div>
+    <input type="file" id="fileInput" accept="image/*" multiple>
+  </div>
+
+  <div class="toolbar" id="toolbar" style="display:none;">
+    <button class="btn" id="runBtn">Run OCR</button>
+    <button class="btn ghost" id="addMoreBtn">Add more photos</button>
+    <button class="btn ghost" id="settingsBtn">⚙️ Settings</button>
+    <button class="btn ghost" id="aiAllBtn">✦ Fix all with AI</button>
+    <button class="btn ghost" id="translateAllBtn">Translate all</button>
+  </div>
+
+  <div id="settingsModal">
+    <div>
+      <h2>Settings</h2>
+      <p>These apply to new scans and translations. Nothing here leaves your device except the OCR text used for translation, as noted earlier.</p>
+
+      <label>OCR language pack</label>
+      <select id="ocrLangSelect">
+        <option value="eng">English only (fastest)</option>
+        <option value="eng+fra" selected>English + French</option>
+        <option value="eng+spa">English + Spanish</option>
+        <option value="eng+deu">English + German</option>
+        <option value="eng+ita">English + Italian</option>
+        <option value="eng+por">English + Portuguese</option>
+        <option value="eng+fra+spa+deu">English + French + Spanish + German</option>
+      </select>
+
+      <label>Fallback currency <span style="font-weight:400;color:var(--ink-soft);">(used only when a receipt's currency can't be detected)</span></label>
+      <select id="currencySelect">
+        <option value="$">$ USD</option>
+        <option value="€">€ EUR</option>
+        <option value="£">£ GBP</option>
+        <option value="¥">¥ JPY</option>
+        <option value="CHF">CHF</option>
+        <option value="CA$">CA$ CAD</option>
+        <option value="AU$">AU$ AUD</option>
+      </select>
+
+      <label>Translate descriptions to</label>
+      <select id="targetLangSelect">
+        <option value="en">English</option>
+        <option value="fr">French</option>
+        <option value="es">Spanish</option>
+        <option value="de">German</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="nl">Dutch</option>
+      </select>
+
+      <label>Claude API key <span style="font-weight:400;color:var(--ink-soft);">(required for "fix fields with AI" — get one at console.anthropic.com)</span></label>
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
+      <p style="margin:6px 0 0;font-size:11px;">Kept in memory for this browser tab only — never saved to disk, never sent anywhere but Anthropic's API, and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
+
+      <div class="modal-actions">
+        <button class="btn" id="closeSettingsBtn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="entries" id="entries">
+    <div class="empty" id="emptyState">No photos yet. Choose some above to get started.</div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none;">
+    <div class="tile billable">
+      <div class="label">Billable total</div>
+      <div class="value" id="billableTotal">—</div>
+    </div>
+    <div class="tile nonbillable">
+      <div class="label">Non-billable total</div>
+      <div class="value" id="nonbillableTotal">—</div>
+    </div>
+    <div class="tile">
+      <div class="label">Grand total</div>
+      <div class="value" id="grandTotal">—</div>
+    </div>
+  </div>
+
+  <footer class="actions" id="actionsFooter" style="display:none;">
+    <div class="actions-inner">
+      <span class="count-label" id="countLabel">0 photos</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn ghost" id="saveProgressBtn">Save progress</button>
+        <button class="btn" id="exportBtn">Download billable report (.xlsx)</button>
+      </div>
+    </div>
+  </footer>
+
+  <div class="signature">vendor, date, description, category and total pulled automatically — check and correct before you export</div>
+</div>
+
+<script>
+(function(){
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const entriesEl = document.getElementById('entries');
+  const emptyState = document.getElementById('emptyState');
+  const toolbar = document.getElementById('toolbar');
+  const runBtn = document.getElementById('runBtn');
+  const addMoreBtn = document.getElementById('addMoreBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const actionsFooter = document.getElementById('actionsFooter');
+  const countLabel = document.getElementById('countLabel');
+  const summaryEl = document.getElementById('summary');
+  const billableTotalEl = document.getElementById('billableTotal');
+  const nonbillableTotalEl = document.getElementById('nonbillableTotal');
+  const grandTotalEl = document.getElementById('grandTotal');
+  const currencySelect = document.getElementById('currencySelect');
+  const targetLangSelect = document.getElementById('targetLangSelect');
+  const translateAllBtn = document.getElementById('translateAllBtn');
+  const aiAllBtn = document.getElementById('aiAllBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsModal = document.getElementById('settingsModal');
+  const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+  const ocrLangSelect = document.getElementById('ocrLangSelect');
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const restoreBanner = document.getElementById('restoreBanner');
+  const restoreText = document.getElementById('restoreText');
+  const restoreBtn = document.getElementById('restoreBtn');
+  const discardBtn = document.getElementById('discardBtn');
+  const saveProgressBtn = document.getElementById('saveProgressBtn');
+
+  let items = []; // {id,file,url,status,progress,rawText,vendor,date,description,category,total,billable,showRaw}
+  let idSeq = 0;
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  addMoreBtn.addEventListener('click', () => fileInput.click());
+  currencySelect.addEventListener('change', render);
+  settingsBtn.addEventListener('click', () => { settingsModal.style.display = 'flex'; });
+  closeSettingsBtn.addEventListener('click', () => { settingsModal.style.display = 'none'; });
+  settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.style.display = 'none'; });
+
+  ['dragover','dragenter'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault(); dropzone.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach(evt => dropzone.addEventListener(evt, e => {
+    e.preventDefault(); dropzone.classList.remove('drag');
+  }));
+  dropzone.addEventListener('drop', e => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
+    fileInput.value = '';
+  });
+
+  function addFiles(fileList){
+    Array.from(fileList).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      const id = 'img_' + (idSeq++);
+      const url = URL.createObjectURL(file);
+      items.push({
+        id, file, url, status:'pending', progress:0,
+        rawText:'', vendor:'', date:'', description:'', category:'Other',
+        netAmount:'', vatRate:'', vatAmount:'', total:'', currency: currencySelect.value,
+        language:'', translatedDescription:'', translating:false,
+        aiWorking:false, aiApplied:false, aiError:'',
+        billable:'Billable', showRaw:false
+      });
+    });
+    render();
+  }
+
+  function removeItem(id){
+    items = items.filter(it => it.id !== id);
+    render();
+  }
+
+  // ---------- persistence: extracted rows only, never the photos themselves ----------
+  const STORAGE_KEY = 'picts-to-ledger:saved-rows';
+
+  function serializeItem(it){
+    return {
+      id: it.id,
+      fileName: it.file ? it.file.name : (it.fileName || 'Saved entry'),
+      vendor: it.vendor, date: it.date, description: it.description,
+      translatedDescription: it.translatedDescription, category: it.category,
+      netAmount: it.netAmount, vatRate: it.vatRate, vatAmount: it.vatAmount,
+      total: it.total, currency: it.currency, language: it.language,
+      billable: it.billable, rawText: it.rawText
+    };
+  }
+
+  async function saveProgress(){
+    const doneItems = items.filter(it => it.status === 'done');
+    if (doneItems.length === 0){
+      alert('Nothing scanned yet to save — run OCR on at least one photo first.');
+      return;
+    }
+    saveProgressBtn.disabled = true;
+    saveProgressBtn.textContent = 'Saving…';
+    try {
+      const payload = JSON.stringify(doneItems.map(serializeItem));
+      const result = await window.storage.set(STORAGE_KEY, payload, false);
+      if (!result) throw new Error('Storage returned no result');
+      saveProgressBtn.textContent = 'Saved ✓';
+    } catch (err){
+      console.error(err);
+      saveProgressBtn.textContent = 'Save failed';
+    }
+    setTimeout(() => { saveProgressBtn.disabled = false; saveProgressBtn.textContent = 'Save progress'; }, 1600);
+  }
+
+  async function checkForSavedProgress(){
+    try {
+      const result = await window.storage.get(STORAGE_KEY, false);
+      if (result && result.value){
+        const saved = JSON.parse(result.value);
+        if (Array.isArray(saved) && saved.length > 0){
+          restoreText.textContent = `Found ${saved.length} saved row${saved.length === 1 ? '' : 's'} from a previous session (data only — photos aren't stored).`;
+          restoreBanner.style.display = 'block';
+        }
+      }
+    } catch (err){
+      // no saved data — nothing to do
+    }
+  }
+
+  restoreBtn.addEventListener('click', async () => {
+    try {
+      const result = await window.storage.get(STORAGE_KEY, false);
+      if (result && result.value){
+        const saved = JSON.parse(result.value);
+        saved.forEach(s => {
+          items.push(Object.assign({}, s, {
+            file: null, url: '', status: 'done', progress: 1, translating: false, showRaw: false,
+            aiWorking: false, aiApplied: false
+          }));
+        });
+        render();
+      }
+    } catch (err){
+      console.error(err);
+      alert('Could not load saved rows.');
+    }
+    restoreBanner.style.display = 'none';
+  });
+
+  discardBtn.addEventListener('click', async () => {
+    try { await window.storage.delete(STORAGE_KEY, false); } catch (err){ /* already gone */ }
+    restoreBanner.style.display = 'none';
+  });
+
+  saveProgressBtn.addEventListener('click', saveProgress);
+  checkForSavedProgress();
+
+
+  const LANG_NAMES = { en:'English', fr:'French', es:'Spanish', de:'German', it:'Italian', pt:'Portuguese', nl:'Dutch' };
+
+  const STOPWORDS = {
+    en: ['the','and','of','to','for','with','total','date','thank','you','receipt','amount','due','change'],
+    fr: ['le','la','les','de','des','et','pour','avec','total','merci','ticket','tva','montant','payer'],
+    es: ['el','la','los','las','de','del','y','para','con','total','gracias','factura','importe'],
+    de: ['der','die','das','und','für','mit','gesamt','danke','rechnung','betrag','summe'],
+    it: ['il','lo','la','di','e','per','con','totale','grazie','fattura','importo'],
+    pt: ['o','a','os','as','de','do','da','e','para','com','total','obrigado','fatura'],
+    nl: ['de','het','een','en','voor','met','totaal','bedankt','bon','bedrag']
+  };
+
+  function detectLanguage(text){
+    if (!text || text.trim().length === 0) return '';
+    const lower = ' ' + text.toLowerCase().replace(/[^\p{L}\s]/gu, ' ') + ' ';
+    let best = '', bestScore = 0;
+    for (const [lang, words] of Object.entries(STOPWORDS)){
+      let score = 0;
+      words.forEach(w => { score += lower.split(' ' + w + ' ').length - 1; });
+      if (score > bestScore){ bestScore = score; best = lang; }
+    }
+    return best; // '' means undetermined
+  }
+
+  async function translateText(text, sourceLang, targetLang){
+    if (!text || !text.trim()) return '';
+    if (sourceLang && sourceLang === targetLang) return text;
+    const pair = `${sourceLang || 'autodetect'}|${targetLang}`;
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${pair}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Translation request failed');
+    const data = await res.json();
+    return (data.responseData && data.responseData.translatedText) ? data.responseData.translatedText : '';
+  }
+
+  const CATEGORY_OPTIONS = ['Other','Meals','Equipment','Medical','Fuel','Parking','Supplies','Travel','Accommodation'];
+
+  async function aiExtractFields(rawText){
+    if (!rawText || !rawText.trim()) throw new Error('No OCR text to work from');
+    const apiKey = apiKeyInput.value.trim();
+    if (!apiKey) throw new Error('Add a Claude API key in Settings (⚙️) first');
+
+    const systemPrompt = `You extract structured data from noisy OCR text of a retail receipt or invoice. The text may contain OCR errors, misread characters, or garbled formatting.
+Return ONLY valid JSON, nothing else — no markdown code fences, no explanation. Use exactly these keys:
+{
+  "vendor": string (store/company name, best guess, "" if unreadable),
+  "date": string (ISO YYYY-MM-DD if a date is present, else ""),
+  "description": string (a short, human-readable 3-8 word summary of what was purchased),
+  "category": one of ${JSON.stringify(CATEGORY_OPTIONS)},
+  "total": number or null (the grand total / amount due, as a plain number, no currency symbol),
+  "currency": string (symbol like "$", "€", "£", or a code like "USD", "" if unclear),
+  "net_amount": number or null (pre-tax amount if determinable, else null),
+  "vat_rate": string (e.g. "20%", "" if not present),
+  "vat_amount": number or null (tax amount if determinable, else null)
+}
+Use your judgement to correct obvious OCR mistakes in numbers and names where the intent is clear.`;
+
+    let response;
+    try {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: rawText }]
+        })
+      });
+    } catch (networkErr){
+      throw new Error('Network/CORS error reaching the API — see console for details');
+    }
+    if (!response.ok){
+      let detail = '';
+      try { detail = (await response.json()).error?.message || ''; } catch(_e){}
+      throw new Error(`API error ${response.status}${detail ? ': ' + detail : ''}`);
+    }
+    const data = await response.json();
+    const text = (data.content || []).map(b => b.text || '').join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    try {
+      return JSON.parse(clean);
+    } catch (parseErr){
+      console.error('Could not parse AI response as JSON:', text);
+      throw new Error('AI returned unexpected format — see console');
+    }
+  }
+
+  function applyAiResult(it, result){
+    if (result.vendor) it.vendor = result.vendor;
+    if (result.date) it.date = result.date;
+    if (result.description) it.description = result.description;
+    if (result.category && CATEGORY_OPTIONS.includes(result.category)) it.category = result.category;
+    if (typeof result.total === 'number') it.total = result.total.toFixed(2);
+    if (result.currency) it.currency = result.currency;
+    if (typeof result.net_amount === 'number') it.netAmount = result.net_amount.toFixed(2);
+    if (result.vat_rate) it.vatRate = result.vat_rate;
+    if (typeof result.vat_amount === 'number') it.vatAmount = result.vat_amount.toFixed(2);
+  }
+
+
+  // ---------- parsing (handles English $ and French € formatted receipts) ----------
+  function parseAmount(str){
+    if (!str) return null;
+    let cleaned = str.replace(/[^\d,.\-]/g, '').trim();
+    if (cleaned.includes(',') && cleaned.includes('.')) {
+      // e.g. "1.234,56" or "1,234.56" — decide decimal by whichever comes last
+      if (cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')) {
+        cleaned = cleaned.replace(/\./g, '').replace(',', '.');
+      } else {
+        cleaned = cleaned.replace(/,/g, '');
+      }
+    } else if (cleaned.includes(',')) {
+      // French decimal comma, e.g. "12,50"
+      cleaned = cleaned.replace(',', '.');
+    }
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+
+  function extractCurrency(text){
+    // explicit symbols win first
+    if (/€/.test(text)) return '€';
+    if (/£/.test(text)) return '£';
+    if (/¥/.test(text)) return '¥';
+    // ISO codes / common words, checked before bare "$" since e.g. "CA$" or "AUD" is more specific
+    if (/\bCHF\b/i.test(text)) return 'CHF';
+    if (/\bCAD\b/i.test(text) || /\bCA\$/i.test(text)) return 'CA$';
+    if (/\bAUD\b/i.test(text) || /\bAU\$/i.test(text)) return 'AU$';
+    if (/\bNZD\b/i.test(text)) return 'NZ$';
+    if (/\bJPY\b/i.test(text)) return '¥';
+    if (/\bGBP\b/i.test(text)) return '£';
+    if (/\bEUR\b/i.test(text)) return '€';
+    if (/\bUSD\b/i.test(text) || /\$/.test(text)) return '$';
+    return null;
+  }
+
+  function extractVendor(lines){
+    const vendorKeywords = ['INTERMARCHÉ','INTERMARCHE','CARREFOUR','PHARMACIE','STATION','CASINO','LECLERC','AUCHAN','MONOPRIX','LIDL','SHELL','TOTAL ENERGIES','WALMART','TARGET','COSTCO'];
+    for (const line of lines){
+      const upper = line.toUpperCase();
+      if (vendorKeywords.some(k => upper.includes(k))) return line;
+    }
+    for (const line of lines){
+      if (line.length > 5 && !/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/.test(line) && !/^\d{1,2}:\d{2}/.test(line)){
+        return line;
+      }
+    }
+    return '';
+  }
+
+  function extractDate(lines){
+    const dateRegex = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
+    for (const line of lines){
+      const m = line.match(dateRegex);
+      if (m){
+        let d = m[1].padStart(2,'0'), mo = m[2].padStart(2,'0'), y = m[3];
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${mo}-${d}`;
+      }
+    }
+    return '';
+  }
+
+  // matches "HT", "H.T.", "H.T" etc. (pre-VAT amount) without matching inside other words
+  const HT_REGEX = /\bh\.?\s*t\.?(?![a-z])/i;
+  // matches "TTC", "T.T.C.", "T.T.C" etc. (VAT-inclusive grand total)
+  const TTC_REGEX = /\bt\.?\s*t\.?\s*c\.?(?![a-z])/i;
+
+  function extractTotal(lines){
+    const numPattern = /\d{1,3}(?:[\s.,]\d{3})*(?:[.,]\d{1,2})/;
+
+    let pickLine = lines.find(l => /\b(amount due|balance due|à payer|grand total)\b/i.test(l))
+      || lines.find(l => TTC_REGEX.test(l))
+      || lines.find(l => /\btotal\b/i.test(l) && !/subtotal|sous-total/i.test(l))
+      || lines.find(l => /\bmontant\b/i.test(l) && !HT_REGEX.test(l))
+      || lines.find(l => /subtotal|sous-total/i.test(l));
+
+    if (pickLine){
+      const m = pickLine.match(numPattern);
+      if (m){
+        const amt = parseAmount(m[0]);
+        if (amt !== null) return amt;
+      }
+    }
+    // fallback: largest currency-looking number anywhere on the receipt,
+    // skipping HT (pre-VAT) lines and VAT-rate percentages so they can't be mistaken for the total
+    const allAmounts = [];
+    lines.forEach(line => {
+      if (HT_REGEX.test(line)) return;
+      if (/%/.test(line)) return;
+      const matches = line.match(new RegExp(numPattern.source, 'g'));
+      if (matches){
+        matches.forEach(m => {
+          const amt = parseAmount(m);
+          if (amt !== null && amt > 0) allAmounts.push(amt);
+        });
+      }
+    });
+    if (allAmounts.length === 0) return null;
+    return Math.max(...allAmounts);
+  }
+
+  function extractDescription(lines, vendor){
+    const skipKeywords = ['total','montant','à payer','tva','cb ','carte','ticket','client','merci','au revoir','subtotal','sous-total'];
+    const candidates = lines.filter(l => {
+      const low = l.toLowerCase();
+      if (low.length < 3) return false;
+      if (skipKeywords.some(k => low.includes(k))) return false;
+      if (HT_REGEX.test(l) || TTC_REGEX.test(l)) return false;
+      if (l === vendor) return false;
+      if (/^[\d\s.,€$£\-]+$/.test(l)) return false;
+      return true;
+    });
+    if (candidates.length === 0) return lines[0] ? lines[0].slice(0, 80) : '';
+    candidates.sort((a,b) => b.length - a.length);
+    return candidates[0].slice(0, 80);
+  }
+
+  function extractVAT(lines, total){
+    // matches lines like "TVA 20% 4,50 €", "VAT (20%): $4.50", "TVA 20,0% : 4.50"
+    const vatLine = lines.find(l => /\b(tva|vat|iva|mwst)\b/i.test(l) && !/\btva\s*(number|num|no|n°|id)\b/i.test(l));
+    const numPattern = /\d{1,3}(?:[\s.,]\d{3})*(?:[.,]\d{1,2})/g;
+
+    let vatRate = null, vatAmount = null;
+
+    if (vatLine){
+      const rateMatch = vatLine.match(/(\d{1,2}(?:[.,]\d+)?)\s*%/);
+      if (rateMatch) vatRate = rateMatch[1].replace(',', '.') + '%';
+
+      const nums = (vatLine.match(numPattern) || []).map(parseAmount).filter(n => n !== null);
+      // drop a number that's actually the rate (e.g. "20" with no decimals, matches rateMatch)
+      const rateNum = rateMatch ? parseFloat(rateMatch[1].replace(',', '.')) : null;
+      const amtCandidates = nums.filter(n => rateNum === null || Math.abs(n - rateNum) > 0.001);
+      if (amtCandidates.length > 0) vatAmount = amtCandidates[amtCandidates.length - 1];
+    }
+
+    // if we only found a rate, derive amount from the total (VAT-inclusive) when possible
+    if (vatAmount === null && vatRate !== null && total !== null){
+      const rateNum = parseFloat(vatRate);
+      if (!isNaN(rateNum) && rateNum > 0){
+        vatAmount = total - (total / (1 + rateNum / 100));
+      }
+    }
+
+    // look for an explicit "HT" / "hors taxe" / "net" line for the pre-VAT amount
+    const netLine = lines.find(l => (HT_REGEX.test(l) || /\b(hors taxe|net amount|subtotal|sous-total)\b/i.test(l)) && !TTC_REGEX.test(l));
+    let netAmount = null;
+    if (netLine){
+      const nums = (netLine.match(numPattern) || []).map(parseAmount).filter(n => n !== null);
+      if (nums.length > 0) netAmount = nums[nums.length - 1];
+    }
+    if (netAmount === null && total !== null && vatAmount !== null){
+      netAmount = total - vatAmount;
+    }
+
+    return { vatRate, vatAmount, netAmount };
+  }
+
+  function guessCategory(vendor, description){
+    const text = (vendor + ' ' + description).toUpperCase();
+    if (/PHARMAC|MEDIC|DOCTOR|CLINIC/.test(text)) return 'Medical';
+    if (/STATION|FUEL|GAZOLE|ESSENCE|SHELL|GAS /.test(text)) return 'Fuel';
+    if (/PARKING|GARAGE/.test(text)) return 'Parking';
+    if (/HOTEL|INN\b|LODG/.test(text)) return 'Accommodation';
+    if (/RESTAURANT|CAFE|CAFÉ|BISTRO/.test(text)) return 'Meals';
+    if (/TAXI|UBER|TRAIN|FLIGHT|AIRLINE/.test(text)) return 'Travel';
+    if (/INTERMARCHÉ|INTERMARCHE|CARREFOUR|CASINO|LECLERC|AUCHAN|MONOPRIX|LIDL|WALMART|TARGET|COSTCO|GROCER|SUPERMARKET/.test(text)) return 'Supplies';
+    return 'Other';
+  }
+
+  function parseReceipt(text){
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const vendor = extractVendor(lines);
+    const date = extractDate(lines);
+    const total = extractTotal(lines);
+    const description = extractDescription(lines, vendor);
+    const category = guessCategory(vendor, description);
+    const vat = extractVAT(lines, total);
+    const currency = extractCurrency(text);
+    return { vendor, date, total, description, category, currency, ...vat };
+  }
+
+  // ---------- render ----------
+  function render(){
+    entriesEl.innerHTML = '';
+    const symbol = currencySelect.value;
+    if (items.length === 0){
+      emptyState.style.display = 'block';
+      entriesEl.appendChild(emptyState);
+      toolbar.style.display = 'none';
+      actionsFooter.style.display = 'none';
+      summaryEl.style.display = 'none';
+      return;
+    }
+    emptyState.style.display = 'none';
+    toolbar.style.display = 'flex';
+    actionsFooter.style.display = 'block';
+    summaryEl.style.display = 'flex';
+    countLabel.textContent = items.length + (items.length === 1 ? ' photo' : ' photos');
+
+    let billableSums = {}, nonbillableSums = {};
+
+    items.forEach(it => {
+      const amt = parseFloat(it.total);
+      const cur = it.currency || currencySelect.value;
+      if (!isNaN(amt)){
+        const bucket = it.billable === 'Billable' ? billableSums : nonbillableSums;
+        bucket[cur] = (bucket[cur] || 0) + amt;
+      }
+
+      const entry = document.createElement('div');
+      entry.className = 'entry ' + (it.billable === 'Billable' ? 'billable' : 'nonbillable');
+
+      const thumb = document.createElement('div');
+      thumb.className = 'entry-thumb';
+      if (it.url){
+        const img = document.createElement('img');
+        img.src = it.url;
+        thumb.appendChild(img);
+      } else {
+        thumb.textContent = '💾';
+        thumb.style.fontSize = '22px';
+      }
+
+      const body = document.createElement('div');
+      body.className = 'entry-body';
+
+      const head = document.createElement('div');
+      head.className = 'entry-head';
+      const name = document.createElement('div');
+      name.className = 'entry-name';
+      name.textContent = it.file ? it.file.name : (it.fileName || 'Saved entry');
+      const status = document.createElement('div');
+      status.className = 'entry-status ' + statusClass(it.status);
+      status.textContent = statusLabel(it) + (it.language && LANG_NAMES[it.language] ? ' · ' + LANG_NAMES[it.language] : '');
+      head.appendChild(name);
+      head.appendChild(status);
+      body.appendChild(head);
+
+      if (it.status === 'working'){
+        const bar = document.createElement('div');
+        bar.className = 'progress-bar';
+        const fill = document.createElement('div');
+        fill.className = 'progress-fill';
+        fill.style.width = Math.round(it.progress * 100) + '%';
+        bar.appendChild(fill);
+        body.appendChild(bar);
+      }
+
+      if (it.status === 'done' && it.aiError && !it.aiApplied){
+        const notice = document.createElement('div');
+        notice.style.cssText = 'font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--bad);margin-bottom:7px;';
+        notice.textContent = `AI extraction failed (${it.aiError}) — showing automatic parsing instead.`;
+        body.appendChild(notice);
+      }
+
+      const row1 = document.createElement('div');
+      row1.className = 'field-row';
+
+      row1.appendChild(makeField('Vendor', it.vendor, v => it.vendor = v, '160px'));
+      row1.appendChild(makeField('Date', it.date, v => it.date = v, '110px', 'YYYY-MM-DD'));
+      row1.appendChild(makeField('Description', it.description, v => it.description = v, null, 'Item description'));
+
+      const row2 = document.createElement('div');
+      row2.className = 'field-row';
+
+      const totalField = document.createElement('div');
+      totalField.className = 'field total';
+      totalField.style.cssText = 'max-width:100px;flex:0 0 100px;';
+      totalField.innerHTML = `<label>Total</label>`;
+      const totalInput = document.createElement('input');
+      totalInput.type = 'text';
+      totalInput.value = it.total;
+      totalInput.placeholder = '0.00';
+      totalInput.addEventListener('input', () => { it.total = totalInput.value; render(); });
+      totalField.appendChild(totalInput);
+      row2.appendChild(totalField);
+
+      const curField = document.createElement('div');
+      curField.className = 'field currency';
+      curField.style.cssText = 'max-width:78px;flex:0 0 78px;';
+      curField.innerHTML = '<label>Currency</label>';
+      const curInput = document.createElement('input');
+      curInput.type = 'text';
+      curInput.value = it.currency;
+      curInput.placeholder = '$';
+      curInput.addEventListener('input', () => { it.currency = curInput.value || currencySelect.value; render(); });
+      curField.appendChild(curInput);
+      row2.appendChild(curField);
+
+      const catField = document.createElement('div');
+      catField.className = 'field category';
+      catField.style.cssText = 'max-width:140px;flex:0 0 140px;';
+      catField.innerHTML = '<label>Category</label>';
+      const catSelect = document.createElement('select');
+      ['Other','Meals','Equipment','Medical','Fuel','Parking','Supplies','Travel','Accommodation'].forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        if (it.category === opt) o.selected = true;
+        catSelect.appendChild(o);
+      });
+      catSelect.addEventListener('change', () => { it.category = catSelect.value; });
+      catField.appendChild(catSelect);
+      row2.appendChild(catField);
+
+      const billField = document.createElement('div');
+      billField.className = 'field billable';
+      billField.style.cssText = 'max-width:132px;flex:0 0 132px;';
+      billField.innerHTML = '<label>Classify</label>';
+      const billSelect = document.createElement('select');
+      billSelect.className = it.billable === 'Billable' ? 'billable-yes' : 'billable-no';
+      ['Billable','Non-billable'].forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        if (it.billable === opt) o.selected = true;
+        billSelect.appendChild(o);
+      });
+      billSelect.addEventListener('change', () => { it.billable = billSelect.value; render(); });
+      billField.appendChild(billSelect);
+      row2.appendChild(billField);
+
+      const row3 = document.createElement('div');
+      row3.className = 'field-row';
+      row3.appendChild(makeField(`Net (${it.currency})`, it.netAmount, v => { it.netAmount = v; }, '90px', '0.00'));
+      row3.appendChild(makeField('VAT rate', it.vatRate, v => { it.vatRate = v; }, '80px', '20%'));
+      row3.appendChild(makeField(`VAT (${it.currency})`, it.vatAmount, v => { it.vatAmount = v; }, '90px', '0.00'));
+
+      body.appendChild(row1);
+      body.appendChild(row2);
+      body.appendChild(row3);
+
+      if (it.status === 'done'){
+        const translateRow = document.createElement('div');
+        translateRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:7px;flex-wrap:wrap;';
+
+        const aiBtn = document.createElement('button');
+        aiBtn.className = 'raw-toggle';
+        aiBtn.style.textDecoration = 'none';
+        aiBtn.style.color = 'var(--good)';
+        aiBtn.textContent = it.aiWorking ? 'asking AI…' : (it.aiApplied ? 'redo with AI ↻' : '✦ fix fields with AI');
+        aiBtn.disabled = it.aiWorking;
+        aiBtn.addEventListener('click', async () => {
+          it.aiWorking = true;
+          render();
+          try {
+            const result = await aiExtractFields(it.rawText);
+            applyAiResult(it, result);
+            it.aiApplied = true;
+          } catch (err){
+            console.error(err);
+            alert('AI extraction failed: ' + err.message);
+          }
+          it.aiWorking = false;
+          render();
+        });
+        translateRow.appendChild(aiBtn);
+
+        const translateBtn = document.createElement('button');
+        translateBtn.className = 'raw-toggle';
+        translateBtn.style.textDecoration = 'none';
+        translateBtn.style.color = 'var(--brass-dark)';
+        translateBtn.textContent = it.translating ? 'translating…' : (it.translatedDescription ? 'retranslate' : 'translate description →');
+        translateBtn.disabled = it.translating;
+        translateBtn.addEventListener('click', async () => {
+          it.translating = true;
+          render();
+          try {
+            const target = targetLangSelect.value;
+            it.translatedDescription = await translateText(it.description, it.language, target);
+          } catch (err){
+            console.error(err);
+            it.translatedDescription = '(translation failed)';
+          }
+          it.translating = false;
+          render();
+        });
+        translateRow.appendChild(translateBtn);
+        body.appendChild(translateRow);
+
+        if (it.translatedDescription){
+          const transField = document.createElement('div');
+          transField.className = 'field';
+          transField.style.marginBottom = '7px';
+          transField.innerHTML = `<label>Translated (${LANG_NAMES[targetLangSelect.value] || targetLangSelect.value})</label>`;
+          const transInput = document.createElement('input');
+          transInput.type = 'text';
+          transInput.value = it.translatedDescription;
+          transInput.addEventListener('input', () => { it.translatedDescription = transInput.value; });
+          transField.appendChild(transInput);
+          body.appendChild(transField);
+        }
+      }
+
+      const rawToggle = document.createElement('button');
+      rawToggle.className = 'raw-toggle';
+      rawToggle.textContent = it.showRaw ? 'hide raw OCR text' : 'show raw OCR text';
+      rawToggle.addEventListener('click', () => { it.showRaw = !it.showRaw; render(); });
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'entry-remove';
+      removeBtn.textContent = 'remove photo';
+      removeBtn.addEventListener('click', () => removeItem(it.id));
+
+      body.appendChild(rawToggle);
+      body.appendChild(removeBtn);
+
+      if (it.showRaw){
+        const rawArea = document.createElement('textarea');
+        rawArea.className = 'raw-text';
+        rawArea.value = it.rawText;
+        rawArea.addEventListener('input', () => { it.rawText = rawArea.value; });
+        body.appendChild(rawArea);
+      }
+
+      entry.appendChild(thumb);
+      entry.appendChild(body);
+      entriesEl.appendChild(entry);
+    });
+
+    function formatSums(sums){
+      const keys = Object.keys(sums);
+      if (keys.length === 0) return '—';
+      return keys.map(c => c + sums[c].toFixed(2)).join('  +  ');
+    }
+    const grandSums = {};
+    [billableSums, nonbillableSums].forEach(bucket => {
+      Object.keys(bucket).forEach(c => { grandSums[c] = (grandSums[c] || 0) + bucket[c]; });
+    });
+
+    billableTotalEl.textContent = formatSums(billableSums);
+    nonbillableTotalEl.textContent = formatSums(nonbillableSums);
+    grandTotalEl.textContent = formatSums(grandSums);
+  }
+
+  function makeField(labelText, value, onInput, maxWidth, placeholder){
+    const field = document.createElement('div');
+    field.className = 'field';
+    if (maxWidth) field.style.cssText = `max-width:${maxWidth};flex:0 0 ${maxWidth};`;
+    field.innerHTML = `<label>${labelText}</label>`;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value || '';
+    if (placeholder) input.placeholder = placeholder;
+    input.addEventListener('input', () => onInput(input.value));
+    field.appendChild(input);
+    return field;
+  }
+
+  function statusClass(s){
+    if (s === 'pending') return 'pending';
+    if (s === 'working') return 'working';
+    if (s === 'error') return 'err';
+    return 'done';
+  }
+  function statusLabel(it){
+    if (it.status === 'pending') return 'not scanned';
+    if (it.status === 'working') return it.aiWorking ? 'extracting fields with AI…' : 'reading…';
+    if (it.status === 'error') return 'failed';
+    return it.aiApplied ? 'scanned ✦AI' : 'scanned';
+  }
+
+  aiAllBtn.addEventListener('click', async () => {
+    aiAllBtn.disabled = true;
+    aiAllBtn.textContent = 'Asking AI…';
+    for (const it of items){
+      if (it.status !== 'done' || !it.rawText) continue;
+      it.aiWorking = true;
+      render();
+      try {
+        const result = await aiExtractFields(it.rawText);
+        applyAiResult(it, result);
+        it.aiApplied = true;
+      } catch (err){
+        console.error(err);
+      }
+      it.aiWorking = false;
+      render();
+    }
+    aiAllBtn.disabled = false;
+    aiAllBtn.textContent = '✦ Fix all with AI';
+  });
+
+  translateAllBtn.addEventListener('click', async () => {
+    translateAllBtn.disabled = true;
+    translateAllBtn.textContent = 'Translating…';
+    const target = targetLangSelect.value;
+    for (const it of items){
+      if (it.status !== 'done' || !it.description) continue;
+      it.translating = true;
+      render();
+      try {
+        it.translatedDescription = await translateText(it.description, it.language, target);
+      } catch (err){
+        console.error(err);
+        it.translatedDescription = '(translation failed)';
+      }
+      it.translating = false;
+      render();
+    }
+    translateAllBtn.disabled = false;
+    translateAllBtn.textContent = 'Translate all';
+  });
+
+  runBtn.addEventListener('click', async () => {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Reading photos…';
+    for (const it of items){
+      if (it.status === 'done') continue;
+      it.status = 'working';
+      it.progress = 0;
+      it.aiError = '';
+      render();
+      try {
+        const result = await Tesseract.recognize(it.file, ocrLangSelect.value, {
+          logger: m => {
+            if (m.status === 'recognizing text' && typeof m.progress === 'number'){
+              it.progress = m.progress * 0.7; // OCR is ~70% of the work, AI extraction is the rest
+              render();
+            }
+          }
+        });
+        it.rawText = (result.data && result.data.text ? result.data.text : '').trim();
+
+        // baseline: fast local parsing, so fields are never blank even if AI is unreachable
+        const baseline = parseReceipt(it.rawText);
+        it.vendor = baseline.vendor;
+        it.date = baseline.date;
+        it.description = baseline.description;
+        it.category = baseline.category;
+        it.total = baseline.total !== null ? baseline.total.toFixed(2) : '';
+        it.netAmount = baseline.netAmount !== null ? baseline.netAmount.toFixed(2) : '';
+        it.vatRate = baseline.vatRate || '';
+        it.vatAmount = baseline.vatAmount !== null ? baseline.vatAmount.toFixed(2) : '';
+        it.currency = baseline.currency || currencySelect.value;
+        it.language = detectLanguage(it.rawText);
+
+        // AI pass: runs automatically, overrides baseline fields when it succeeds
+        it.aiWorking = true;
+        it.progress = 0.75;
+        render();
+        try {
+          const aiResult = await aiExtractFields(it.rawText);
+          applyAiResult(it, aiResult);
+          it.aiApplied = true;
+        } catch (aiErr){
+          console.error('AI extraction failed, keeping automatic parsing:', aiErr);
+          it.aiApplied = false;
+          it.aiError = aiErr.message || 'AI extraction failed';
+        }
+        it.aiWorking = false;
+        it.progress = 1;
+        it.status = 'done';
+      } catch (err){
+        console.error(err);
+        it.status = 'error';
+      }
+      render();
+    }
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run OCR';
+  });
+
+  exportBtn.addEventListener('click', () => {
+    if (items.length === 0) return;
+
+    const rows = [['Date','Vendor','Category','Description','Description (translated)','Net','VAT rate','VAT','Total','Currency','Billable']];
+    let billableSums = {}, nonbillableSums = {}, vatSums = {};
+
+    items.forEach(it => {
+      const amt = parseFloat(it.total);
+      const cur = it.currency || currencySelect.value;
+      const amtVal = isNaN(amt) ? '' : amt;
+      const netVal = it.netAmount !== '' && !isNaN(parseFloat(it.netAmount)) ? parseFloat(it.netAmount) : '';
+      const vatVal = it.vatAmount !== '' && !isNaN(parseFloat(it.vatAmount)) ? parseFloat(it.vatAmount) : '';
+      if (!isNaN(amt)){
+        const bucket = it.billable === 'Billable' ? billableSums : nonbillableSums;
+        bucket[cur] = (bucket[cur] || 0) + amt;
+      }
+      if (vatVal !== '') vatSums[cur] = (vatSums[cur] || 0) + vatVal;
+      rows.push([it.date || '', it.vendor || '', it.category || 'Other', it.description || '(no description)', it.translatedDescription || '', netVal, it.vatRate || '', vatVal, amtVal, cur, it.billable]);
+    });
+
+    const fmtBucket = (bucket) => Object.keys(bucket).map(c => `${c}${bucket[c].toFixed(2)}`).join('  +  ');
+
+    rows.push([]);
+    rows.push(['Billable total', '', '', '', '', '', '', '', '', '', fmtBucket(billableSums)]);
+    rows.push(['Non-billable total', '', '', '', '', '', '', '', '', '', fmtBucket(nonbillableSums)]);
+    rows.push(['VAT collected', '', '', '', '', '', '', '', '', '', fmtBucket(vatSums)]);
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 14 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Billable report');
+
+    const stamp = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, 'billable-report-' + stamp + '.xlsx');
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# systemd user unit. Install:
+#   mkdir -p ~/.config/systemd/user && cp contrib/bill2sheet-watch.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now bill2sheet-watch
+# Edit the two paths below first. Keep running after logout: loginctl enable-linger "$USER"
+[Unit]
+Description=bill2sheet folder watcher
+
+[Service]
+ExecStart=%h/.local/bin/bill2sheet watch %h/Receipts/inbox -o %h/Receipts/bills.xlsx
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
