@@ -431,31 +431,48 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
 
     let response;
     try {
-      response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: rawText }]
-        })
-      });
+      if (provider === 'deepseek'){
+        response = await fetch('https://api.deepseek.com/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+          body: JSON.stringify({
+            model: 'deepseek-flash',
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: rawText }],
+            response_format: { type: 'json_object' },
+            thinking: { type: 'disabled' },
+            max_tokens: 1000,
+            stream: false
+          })
+        });
+      } else {
+        response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 1000,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: rawText }]
+          })
+        });
+      }
     } catch (networkErr){
-      throw new Error('Network/CORS error reaching the API — see console for details');
+      throw new Error('Network/CORS error reaching the ' + (provider === 'deepseek' ? 'DeepSeek' : 'Claude') + ' API — see console for details');
     }
     if (!response.ok){
       let detail = '';
-      try { detail = (await response.json()).error?.message || ''; } catch(_e){}
+      try { const j = await response.json(); detail = (j.error && j.error.message) || ''; } catch(_e){}
       throw new Error(`API error ${response.status}${detail ? ': ' + detail : ''}`);
     }
     const data = await response.json();
-    const text = (data.content || []).map(b => b.text || '').join('');
+    const text = provider === 'deepseek'
+      ? ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '')
+      : (data.content || []).map(b => b.text || '').join('');
     const clean = text.replace(/```json|```/g, '').trim();
     try {
       return JSON.parse(clean);
@@ -512,7 +529,7 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
     if (/\bGBP\b/i.test(text)) return '£';
     if (/\bEUR\b/i.test(text)) return '€';
     if (/\bUSD\b/i.test(text) || /\$/.test(text)) return '$';
-    if (/[\u0E00-\u0E7F]{3,}/.test(text)) return '฿';
+    if (/[\u0E00-\u0E7F]{3,}/.test(text)) return '฿'; // Thai script and no other currency marker
     return null;
   }
 
