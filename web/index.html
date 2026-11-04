@@ -92,7 +92,7 @@
   <header>
     <div class="eyebrow">Photos → OCR → Billable report</div>
     <h1>Picts to Ledger</h1>
-    <p class="sub">Pick receipt or invoice photos from your gallery. OCR reads vendor, date, description, category, total and currency, detects the receipt's language, and can translate it. Add a Claude API key in Settings (⚙️) to let AI clean up misread fields.</p>
+    <p class="sub">Pick receipt or invoice photos from your gallery. OCR reads vendor, date, description, category, total and currency, detects the receipt's language, and can translate it. Add a Claude or DeepSeek API key in Settings (⚙️) to let AI clean up misread fields.</p>
   </header>
 
   <div class="card" id="restoreBanner" style="display:none;padding:14px 16px;margin-bottom:16px;">
@@ -159,9 +159,15 @@
         <option value="th">Thai</option>
       </select>
 
-      <label>Claude API key <span style="font-weight:400;color:var(--ink-soft);">(required for "fix fields with AI" — get one at console.anthropic.com)</span></label>
+      <label>AI provider <span style="font-weight:400;color:var(--ink-soft);">(used by "fix fields with AI")</span></label>
+      <select id="aiProviderSelect">
+        <option value="claude">Claude (Anthropic) — console.anthropic.com</option>
+        <option value="deepseek">DeepSeek — platform.deepseek.com</option>
+      </select>
+
+      <label>API key</label>
       <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
-      <p style="margin:6px 0 0;font-size:11px;">Kept in memory for this browser tab only — never saved to disk, never sent anywhere but Anthropic's API, and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
+      <p style="margin:6px 0 0;font-size:11px;">Kept in memory for this browser tab only — never saved to disk, never sent anywhere but the AI provider you picked (Anthropic or DeepSeek), and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
 
       <div class="modal-actions">
         <button class="btn" id="closeSettingsBtn">Done</button>
@@ -226,6 +232,11 @@
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
   const ocrLangSelect = document.getElementById('ocrLangSelect');
   const apiKeyInput = document.getElementById('apiKeyInput');
+  const aiProviderSelect = document.getElementById('aiProviderSelect');
+  aiProviderSelect.addEventListener('change', () => {
+    apiKeyInput.placeholder = aiProviderSelect.value === 'deepseek' ? 'sk-...' : 'sk-ant-...';
+    apiKeyInput.value = ''; // a key for one provider is useless to the other
+  });
   const restoreBanner = document.getElementById('restoreBanner');
   const restoreText = document.getElementById('restoreText');
   const restoreBtn = document.getElementById('restoreBtn');
@@ -400,7 +411,8 @@
   async function aiExtractFields(rawText){
     if (!rawText || !rawText.trim()) throw new Error('No OCR text to work from');
     const apiKey = apiKeyInput.value.trim();
-    if (!apiKey) throw new Error('Add a Claude API key in Settings (⚙️) first');
+    const provider = aiProviderSelect.value;
+    if (!apiKey) throw new Error('Add an API key in Settings (⚙️) first');
 
     const systemPrompt = `You extract structured data from noisy OCR text of a retail receipt or invoice. The text may contain OCR errors, misread characters, or garbled formatting.
 Return ONLY valid JSON, nothing else — no markdown code fences, no explanation. Use exactly these keys:
