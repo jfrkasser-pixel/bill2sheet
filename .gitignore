@@ -15,3 +15,8 @@ dist/
 *.tif
 *.tiff
 *.bmp
+
+# never commit keys
+id_*
+*.pem
+*.key

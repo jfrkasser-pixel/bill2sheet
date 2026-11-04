@@ -131,6 +131,7 @@
         <option value="eng+deu">English + German</option>
         <option value="eng+ita">English + Italian</option>
         <option value="eng+por">English + Portuguese</option>
+        <option value="tha+eng">Thai + English</option>
         <option value="eng+fra+spa+deu">English + French + Spanish + German</option>
       </select>
 
@@ -140,6 +141,7 @@
         <option value="€">€ EUR</option>
         <option value="£">£ GBP</option>
         <option value="¥">¥ JPY</option>
+        <option value="฿">฿ THB</option>
         <option value="CHF">CHF</option>
         <option value="CA$">CA$ CAD</option>
         <option value="AU$">AU$ AUD</option>
@@ -154,6 +156,7 @@
         <option value="it">Italian</option>
         <option value="pt">Portuguese</option>
         <option value="nl">Dutch</option>
+        <option value="th">Thai</option>
       </select>
 
       <label>Claude API key <span style="font-weight:400;color:var(--ink-soft);">(required for "fix fields with AI" — get one at console.anthropic.com)</span></label>
@@ -355,7 +358,7 @@
   checkForSavedProgress();
 
 
-  const LANG_NAMES = { en:'English', fr:'French', es:'Spanish', de:'German', it:'Italian', pt:'Portuguese', nl:'Dutch' };
+  const LANG_NAMES = { en:'English', fr:'French', es:'Spanish', de:'German', it:'Italian', pt:'Portuguese', nl:'Dutch', th:'Thai' };
 
   const STOPWORDS = {
     en: ['the','and','of','to','for','with','total','date','thank','you','receipt','amount','due','change'],
@@ -369,6 +372,8 @@
 
   function detectLanguage(text){
     if (!text || text.trim().length === 0) return '';
+    const thai = (text.match(/[\u0E00-\u0E7F]/g) || []).length;
+    if (thai >= 3 && thai > text.replace(/\s/g,'').length * 0.15) return 'th';
     const lower = ' ' + text.toLowerCase().replace(/[^\p{L}\s]/gu, ' ') + ' ';
     let best = '', bestScore = 0;
     for (const [lang, words] of Object.entries(STOPWORDS)){
@@ -485,6 +490,7 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
     if (/€/.test(text)) return '€';
     if (/£/.test(text)) return '£';
     if (/¥/.test(text)) return '¥';
+    if (/฿/.test(text) || /\bTHB\b/i.test(text) || /บาท/.test(text)) return '฿';
     // ISO codes / common words, checked before bare "$" since e.g. "CA$" or "AUD" is more specific
     if (/\bCHF\b/i.test(text)) return 'CHF';
     if (/\bCAD\b/i.test(text) || /\bCA\$/i.test(text)) return 'CA$';
@@ -494,6 +500,7 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
     if (/\bGBP\b/i.test(text)) return '£';
     if (/\bEUR\b/i.test(text)) return '€';
     if (/\bUSD\b/i.test(text) || /\$/.test(text)) return '$';
+    if (/[\u0E00-\u0E7F]{3,}/.test(text)) return '฿';
     return null;
   }
 
@@ -511,14 +518,68 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
     return '';
   }
 
+  const MONTHS = {
+    en: ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'],
+    fr: ['janv','févr','fevr','mars','avr','mai','juin','juil','août','aout','sept','oct','nov','déc','dec']
+  };
+  const MONTH_LOOKUP = (() => {
+    const m = {};
+    MONTHS.en.forEach((n,i) => m[n] = i+1);
+    ['janv','févr','fevr','mars','avr','mai','juin','juil','août','aout','sept','oct','nov','déc','dec']
+      .forEach((n,i) => { m[n] = [1,2,2,3,4,5,6,7,8,8,9,10,11,12,12][i]; });
+    // Thai: abbreviations (dots optional) and full names
+    const th = [
+      ['มกราคม','มค'],['กุมภาพันธ์','กพ'],['มีนาคม','มีค'],['เมษายน','เมย'],['พฤษภาคม','พค'],['มิถุนายน','มิย'],
+      ['กรกฎาคม','กค'],['สิงหาคม','สค'],['กันยายน','กย'],['ตุลาคม','ตค'],['พฤศจิกายน','พย'],['ธันวาคม','ธค']
+    ];
+    th.forEach(([full, ab], i) => { m[full] = i+1; m[ab] = i+1; });
+    return m;
+  })();
+
+  function normalizeDigits(s){
+    return s.replace(/[\u0E50-\u0E59]/g, c => String(c.charCodeAt(0) - 0x0E50));
+  }
+
+  function fullYear(y, thaiContext){
+    let n = parseInt(y, 10);
+    if (y.length <= 2) n += (thaiContext && n >= 50) ? 2500 : 2000;
+    if (n > 2400) n -= 543; // Buddhist Era (Thai receipts: 2569 = 2026)
+    return n;
+  }
+
+  function isoDate(y, m, d){
+    if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1990 || y > 2100) return '';
+    return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+
   function extractDate(lines){
-    const dateRegex = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
-    for (const line of lines){
-      const m = line.match(dateRegex);
+    const thaiContext = lines.some(l => /[\u0E00-\u0E7F]/.test(l));
+    const monthKeys = Object.keys(MONTH_LOOKUP).sort((a,b) => b.length - a.length).map(k => k.replace(/\./g,''));
+    const monthAlt = monthKeys.join('|');
+    // "30 ส.ค. 69", "30 Aug 2026", "30 สิงหาคม 2569" (dots/spaces optional)
+    const textual = new RegExp('(\\d{1,2})\\s*\\.?\\s*((?:' + monthAlt + ')(?:\\.|(?=[^\\p{L}]|$))?)(?:\\s*\\.?\\s*)(\\d{2,4})', 'iu');
+    const numeric = /(?<!\d)(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})(?!\d)/;
+    const iso = /(?<!\d)(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})(?!\d)/;
+    for (const raw of lines){
+      const line = normalizeDigits(raw).replace(/([\u0E00-\u0E7F])\./g, '$1'); // ส.ค. -> สค
+      let m = line.match(iso);
       if (m){
-        let d = m[1].padStart(2,'0'), mo = m[2].padStart(2,'0'), y = m[3];
-        if (y.length === 2) y = '20' + y;
-        return `${y}-${mo}-${d}`;
+        const r = isoDate(fullYear(m[1], thaiContext), +m[2], +m[3]);
+        if (r) return r;
+      }
+      m = line.match(textual);
+      if (m){
+        const key = m[2].toLowerCase().replace(/\./g,'');
+        const mo = MONTH_LOOKUP[key];
+        const r = mo && isoDate(fullYear(m[3], thaiContext), mo, +m[1]);
+        if (r) return r;
+      }
+      m = line.match(numeric);
+      if (m){
+        let d = +m[1], mo = +m[2];
+        if (mo > 12 && d <= 12){ [d, mo] = [mo, d]; } // unambiguous US-style
+        const r = isoDate(fullYear(m[3], thaiContext), mo, d);
+        if (r) return r;
       }
     }
     return '';
