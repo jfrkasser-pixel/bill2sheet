@@ -447,7 +447,7 @@ Return ONLY valid JSON, nothing else — no markdown code fences, no explanation
 }
 Use your judgement to correct obvious OCR mistakes in numbers and names where the intent is clear.
 Dates on Thai receipts may use Buddhist Era years (2569 = 2026): always return the Gregorian ISO date. Use "THB" for baht (฿).
-If an image is attached, read the receipt from the image and treat any OCR text only as a hint.`;
+For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer successful): vendor = the recipient's name, description = \"Bank transfer, ref <reference or item number>\", total = the amount transferred, date = the transfer date.\nIf an image is attached, read the receipt from the image and treat any OCR text only as a hint.`;
 
     let response;
     try {
@@ -629,7 +629,9 @@ If an image is attached, read the receipt from the image and treat any OCR text 
     const numeric = /(?<!\d)(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})(?!\d)/;
     const iso = /(?<!\d)(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})(?!\d)/;
     for (const raw of lines){
-      const line = normalizeDigits(raw).replace(/([\u0E00-\u0E7F])\./g, '$1'); // ส.ค. -> สค
+      const line = normalizeDigits(raw)
+        .replace(/([\u0E00-\u0E7F.])\s+(?=[\u0E00-\u0E7F.])/g, '$1') // spaced-out Thai glyphs
+        .replace(/([\u0E00-\u0E7F])\./g, '$1'); // ส.ค. -> สค
       let m = line.match(iso);
       if (m){
         const r = isoDate(fullYear(m[1], thaiContext), +m[2], +m[3]);
@@ -760,12 +762,32 @@ If an image is attached, read the receipt from the image and treat any OCR text 
     return 'Other';
   }
 
+  // reference / transaction / item number: on the label's line or the line after it
+  function extractReference(lines){
+    const label = /เลขที่รายการ|เลขที่อ้างอิง|รหัสอ้างอิง|หมายเลขอ้างอิง|ref(?:erence)?\.?\s*(?:no|number|id)?\.?|transaction\s*(?:id|no|number)|item\s*number/i;
+    const token = /[0-9A-Za-z]{8,}/;
+    for (let i = 0; i < lines.length; i++){
+      const m = normalizeDigits(lines[i]).match(label);
+      if (!m) continue;
+      const after = normalizeDigits(lines[i]).slice(m.index + m[0].length);
+      let t = after.match(token);
+      if (!t && lines[i + 1]) t = normalizeDigits(lines[i + 1]).match(token);
+      if (t) return t[0];
+    }
+    return '';
+  }
+
   function parseReceipt(text){
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
     const vendor = extractVendor(lines);
     const date = extractDate(lines);
     const total = extractTotal(lines);
-    const description = extractDescription(lines, vendor);
+    let description = extractDescription(lines, vendor);
+    const ref = extractReference(lines);
+    const isTransfer = /โอนเงิน|transfer/i.test(text);
+    if (ref && (isTransfer || !description || /เลขที่|อ้างอิง|\bref|reference|item number/i.test(description))){
+      description = (isTransfer ? 'Bank transfer' : 'Receipt') + ' ref ' + ref;
+    }
     const category = guessCategory(vendor, description);
     const vat = extractVAT(lines, total);
     const currency = extractCurrency(text);
