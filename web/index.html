@@ -92,7 +92,7 @@
   <header>
     <div class="eyebrow">Photos → OCR → Billable report</div>
     <h1>Picts to Ledger</h1>
-    <p class="sub">Pick receipt or invoice photos from your gallery. OCR reads vendor, date, description, category, total and currency, detects the receipt's language, and can translate it. Add a Claude or DeepSeek API key in Settings (⚙️) to let AI clean up misread fields.</p>
+    <p class="sub">Pick receipt or invoice photos from your gallery. OCR reads vendor, date, description, category, total and currency, detects the receipt's language, and can translate it. Add a Gemini API key in Settings (⚙️) to let AI read the photo and fix misread fields.</p>
   </header>
 
   <div class="card" id="restoreBanner" style="display:none;padding:14px 16px;margin-bottom:16px;">
@@ -159,18 +159,15 @@
         <option value="th">Thai</option>
       </select>
 
-      <label>AI provider <span style="font-weight:400;color:var(--ink-soft);">(used by "fix fields with AI")</span></label>
-      <select id="aiProviderSelect">
-        <option value="claude">Claude (Anthropic) — console.anthropic.com</option>
-        <option value="deepseek">DeepSeek — platform.deepseek.com</option>
-        <option value="gemini">Gemini (Google) — aistudio.google.com — reads the photo</option>
-      </select>
-
-      <label>API key</label>
-      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
-      <label>Model <span style="font-weight:400;color:var(--ink-soft);">(optional — leave empty for the default)</span></label>
+      <label>Gemini API key <span style="font-weight:400;color:var(--ink-soft);">(optional: entering a key switches AI on. Free key at aistudio.google.com)</span></label>
+      <input type="password" id="apiKeyInput" placeholder="AIza..." style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
+      <label>Model <span style="font-weight:400;color:var(--ink-soft);">(optional, leave empty for the default)</span></label>
       <input type="text" id="aiModelInput" placeholder="default" style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
-      <p style="margin:6px 0 0;font-size:11px;">Kept in memory for this browser tab only — never saved to disk, never sent anywhere but the AI provider you picked (Anthropic, DeepSeek or Google — with Gemini the receipt photo itself is sent too), and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <button class="btn" id="testKeyBtn" type="button">Test key</button>
+        <span id="testKeyResult" style="font-size:12px;"></span>
+      </div>
+      <p style="margin:6px 0 0;font-size:11px;">With no key, AI stays off and nothing is sent anywhere. With a key, AI runs after each scan and you can also tap ✦ fix fields with AI. Kept in memory for this browser tab only — never saved to disk, never sent anywhere but Google's Gemini API (the receipt photo itself is sent too), and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
 
       <div class="modal-actions">
         <button class="btn" id="closeSettingsBtn">Done</button>
@@ -235,13 +232,9 @@
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
   const ocrLangSelect = document.getElementById('ocrLangSelect');
   const apiKeyInput = document.getElementById('apiKeyInput');
-  const aiProviderSelect = document.getElementById('aiProviderSelect');
   const aiModelInput = document.getElementById('aiModelInput');
-  aiProviderSelect.addEventListener('change', () => {
-    apiKeyInput.placeholder = { claude: 'sk-ant-...', deepseek: 'sk-...', gemini: 'AIza...' }[aiProviderSelect.value] || '';
-    aiModelInput.value = '';
-    apiKeyInput.value = ''; // a key for one provider is useless to the other
-  });
+  const testKeyBtn = document.getElementById('testKeyBtn');
+  const testKeyResult = document.getElementById('testKeyResult');
   const restoreBanner = document.getElementById('restoreBanner');
   const restoreText = document.getElementById('restoreText');
   const restoreBtn = document.getElementById('restoreBtn');
@@ -414,6 +407,9 @@
   const CATEGORY_OPTIONS = ['Other','Meals','Equipment','Medical','Fuel','Parking','Supplies','Travel','Accommodation'];
 
   // shrink the photo so the request stays small; Gemini reads it directly
+  const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
+  const GEMINI_MODEL = 'gemini-flash-latest';
+
   async function fileToJpegBase64(file, maxSide = 1600){
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
@@ -426,11 +422,10 @@
 
   async function aiExtractFields(rawText, file){
     const apiKey = apiKeyInput.value.trim();
-    const provider = aiProviderSelect.value;
     if (!apiKey) throw new Error('Add an API key in Settings (⚙️) first');
     const modelOverride = aiModelInput.value.trim();
     const hasText = !!(rawText && rawText.trim());
-    if (!hasText && !(provider === 'gemini' && file)) throw new Error('No OCR text to work from');
+    if (!hasText && !file) throw new Error('No OCR text to work from');
 
     const systemPrompt = `You extract structured data from noisy OCR text of a retail receipt or invoice. The text may contain OCR errors, misread characters, or garbled formatting.
 Return ONLY valid JSON, nothing else — no markdown code fences, no explanation. Use exactly these keys:
@@ -449,57 +444,27 @@ Use your judgement to correct obvious OCR mistakes in numbers and names where th
 Dates on Thai receipts may use Buddhist Era years (2569 = 2026): always return the Gregorian ISO date. Use "THB" for baht (฿).
 For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer successful): vendor = the recipient's name, description = \"Bank transfer, ref <reference or item number>\", total = the amount transferred, date = the transfer date.\nIf an image is attached, read the receipt from the image and treat any OCR text only as a hint.`;
 
+    const parts = [];
+    if (file){
+      try { parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fileToJpegBase64(file) } }); }
+      catch (_e){ /* unreadable image (e.g. HEIC): fall back to the OCR text */ }
+    }
+    if (!parts.length && !hasText) throw new Error('Could not read the photo for Gemini');
+    parts.push({ text: hasText ? 'OCR text (may contain mistakes, use as a hint):\n' + rawText : 'No OCR text; read the receipt from the image.' });
+
     let response;
     try {
-      if (provider === 'gemini'){
-        const parts = [];
-        if (file){
-          try { parts.push({ inlineData: { mimeType: 'image/jpeg', data: await fileToJpegBase64(file) } }); }
-          catch (_e){ /* unreadable image (e.g. HEIC): fall back to the OCR text */ }
-        }
-        if (!parts.length && !hasText) throw new Error('Could not read the photo for Gemini');
-        parts.push({ text: hasText ? 'OCR text (may contain mistakes, use as a hint):\n' + rawText : 'No OCR text; read the receipt from the image.' });
-        response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(modelOverride || 'gemini-flash-latest') + ':generateContent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: [{ role: 'user', parts }],
-            generationConfig: { responseMimeType: 'application/json' }
-          })
-        });
-      } else if (provider === 'deepseek'){
-        response = await fetch('https://api.deepseek.com/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-          body: JSON.stringify({
-            model: modelOverride || 'deepseek-flash',
-            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: rawText }],
-            response_format: { type: 'json_object' },
-            thinking: { type: 'disabled' },
-            max_tokens: 1000,
-            stream: false
-          })
-        });
-      } else {
-        response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true'
-          },
-          body: JSON.stringify({
-            model: modelOverride || 'claude-sonnet-4-6',
-            max_tokens: 1000,
-            system: systemPrompt,
-            messages: [{ role: 'user', content: rawText }]
-          })
-        });
-      }
+      response = await fetch(GEMINI_BASE + encodeURIComponent(modelOverride || GEMINI_MODEL) + ':generateContent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: 'user', parts }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
     } catch (networkErr){
-      throw new Error('Network/CORS error reaching the ' + ({ deepseek: 'DeepSeek', gemini: 'Gemini' }[provider] || 'Claude') + ' API — see console for details');
+      throw new Error('Network/CORS error reaching the Gemini API, see console for details');
     }
     if (!response.ok){
       let detail = '';
@@ -507,11 +472,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
       throw new Error(`API error ${response.status}${detail ? ': ' + detail : ''}`);
     }
     const data = await response.json();
-    const text = provider === 'gemini'
-      ? ((((data.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || '').join('')
-      : provider === 'deepseek'
-      ? ((data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '')
-      : (data.content || []).map(b => b.text || '').join('');
+    const text = ((((data.candidates || [])[0] || {}).content || {}).parts || []).map(p => p.text || '').join('');
     const clean = text.replace(/```json|```/g, '').trim();
     try {
       return JSON.parse(clean);
@@ -520,6 +481,29 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
       throw new Error('AI returned unexpected format — see console');
     }
   }
+
+  testKeyBtn.addEventListener('click', async () => {
+    const key = apiKeyInput.value.trim();
+    testKeyResult.style.color = 'inherit';
+    if (!key){ testKeyResult.textContent = 'Enter a key first.'; return; }
+    testKeyResult.textContent = 'Testing…';
+    testKeyBtn.disabled = true;
+    try {
+      const r = await fetch(GEMINI_BASE + encodeURIComponent(aiModelInput.value.trim() || GEMINI_MODEL) + ':generateContent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Reply with the single word OK' }] }] })
+      });
+      let detail = '';
+      if (!r.ok){ try { detail = ((await r.json()).error || {}).message || ''; } catch (_e){} }
+      testKeyResult.textContent = r.ok ? 'Key works ✓' : 'Error ' + r.status + (detail ? ': ' + detail : '');
+      testKeyResult.style.color = r.ok ? 'green' : 'crimson';
+    } catch (_e){
+      testKeyResult.textContent = 'Network/CORS error: could not reach Google';
+      testKeyResult.style.color = 'crimson';
+    }
+    testKeyBtn.disabled = false;
+  });
 
   function applyAiResult(it, result){
     if (result.vendor) it.vendor = result.vendor;
@@ -1153,13 +1137,14 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
         it.progress = 0.75;
         render();
         try {
+          if (!apiKeyInput.value.trim()) throw new Error('NOKEY'); // AI stays off until a key is entered
           const aiResult = await aiExtractFields(it.rawText, it.file);
           applyAiResult(it, aiResult);
           it.aiApplied = true;
         } catch (aiErr){
           console.error('AI extraction failed, keeping automatic parsing:', aiErr);
           it.aiApplied = false;
-          it.aiError = aiErr.message || 'AI extraction failed';
+          it.aiError = aiErr.message === 'NOKEY' ? '' : (aiErr.message || 'AI extraction failed');
         }
         it.aiWorking = false;
         it.progress = 1;
