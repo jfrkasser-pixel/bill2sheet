@@ -167,7 +167,8 @@
         <button class="btn" id="testKeyBtn" type="button">Test key</button>
         <span id="testKeyResult" style="font-size:12px;"></span>
       </div>
-      <p style="margin:6px 0 0;font-size:11px;">With no key, AI stays off and nothing is sent anywhere. With a key, AI runs after each scan and you can also tap ✦ fix fields with AI. Kept in memory for this browser tab only — never saved to disk, never sent anywhere but Google's Gemini API (the receipt photo itself is sent too), and gone the moment you close or reload the page. You'll need to re-enter it next time you open the app.</p>
+      <label style="display:flex;gap:8px;align-items:center;font-weight:400;margin-top:10px;"><input type="checkbox" id="rememberKey"> Remember this key on this device (leave off on shared phones)</label>
+      <p style="margin:6px 0 0;font-size:11px;">With no key, AI stays off and nothing is sent anywhere. With a key, AI runs after each scan and you can also tap ✦ fix fields with AI. The key and the receipt photo go only to Google's Gemini API. By default the key stays in memory for this tab and is gone when you reload. Tick "Remember" to store it in this browser only; anyone using this phone's browser could then read it.</p>
 
       <div class="modal-actions">
         <button class="btn" id="closeSettingsBtn">Done</button>
@@ -242,6 +243,19 @@
   const aiModelInput = document.getElementById('aiModelInput');
   const testKeyBtn = document.getElementById('testKeyBtn');
   const testKeyResult = document.getElementById('testKeyResult');
+  const rememberKey = document.getElementById('rememberKey');
+  try {
+    const savedKey = localStorage.getItem('p2l_geminiKey');
+    if (savedKey){ apiKeyInput.value = savedKey; rememberKey.checked = true; }
+  } catch (_e) { /* storage unavailable */ }
+  function syncRememberedKey(){
+    try {
+      if (rememberKey.checked && apiKeyInput.value.trim()) localStorage.setItem('p2l_geminiKey', apiKeyInput.value.trim());
+      else localStorage.removeItem('p2l_geminiKey');
+    } catch (_e) {}
+  }
+  rememberKey.addEventListener('change', syncRememberedKey);
+  apiKeyInput.addEventListener('input', syncRememberedKey);
   const restoreBanner = document.getElementById('restoreBanner');
   const restoreText = document.getElementById('restoreText');
   const restoreBtn = document.getElementById('restoreBtn');
@@ -757,7 +771,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
   }
 
   // reference / transaction / item number: on the label's line or the line after it
-  function extractReference(lines){
+  function extractReference(lines, loose){
     const label = /เลขที่รายการ|เลขที่อ้างอิง|รหัสอ้างอิง|หมายเลขอ้างอิง|ref(?:erence)?\.?\s*(?:no|number|id)?\.?|transaction\s*(?:id|no|number)|item\s*number/i;
     const token = /[0-9A-Za-z]{8,}/;
     for (let i = 0; i < lines.length; i++){
@@ -765,8 +779,14 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
       if (!m) continue;
       const after = normalizeDigits(lines[i]).slice(m.index + m[0].length);
       let t = after.match(token);
-      if (!t && lines[i + 1]) t = normalizeDigits(lines[i + 1]).match(token);
+      for (let k = 1; !t && k <= 3 && lines[i + k]; k++) t = normalizeDigits(lines[i + k]).match(token);
       if (t) return t[0];
+    }
+    if (loose){
+      for (const l of lines){
+        const m = normalizeDigits(l).match(/\b\d{9,}[0-9A-Za-z]{4,}\b/);
+        if (m) return m[0];
+      }
     }
     return '';
   }
@@ -777,7 +797,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     const date = extractDate(lines);
     const total = extractTotal(lines);
     let description = extractDescription(lines, vendor);
-    const ref = extractReference(lines);
+    const ref = extractReference(lines, /โอนเงิน|transfer/i.test(text));
     const isTransfer = /โอนเงิน|transfer/i.test(text);
     if (ref && (isTransfer || !description || /เลขที่|อ้างอิง|\bref|reference|item number/i.test(description))){
       description = (isTransfer ? 'Bank transfer' : 'Receipt') + ' ref ' + ref;
