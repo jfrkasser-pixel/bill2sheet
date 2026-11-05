@@ -499,18 +499,22 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     parts.push({ text: hasText ? 'OCR text (may contain mistakes, use as a hint):\n' + rawText : 'No OCR text; read the receipt from the image.' });
 
     let response;
-    try {
-      response = await fetch(GEMINI_BASE + encodeURIComponent(modelOverride || GEMINI_MODEL) + ':generateContent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: 'user', parts }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      });
-    } catch (networkErr){
-      throw new Error('Network/CORS error reaching the Gemini API, see console for details');
+    for (let attempt = 0; attempt < 3; attempt++){
+      try {
+        response = await fetch(GEMINI_BASE + encodeURIComponent(modelOverride || GEMINI_MODEL) + ':generateContent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ role: 'user', parts }],
+            generationConfig: { responseMimeType: 'application/json' }
+          })
+        });
+      } catch (networkErr){
+        throw new Error('Network/CORS error reaching the Gemini API, see console for details');
+      }
+      if (response.status !== 503 && response.status !== 429) break; // busy: wait and try again
+      await new Promise(res => setTimeout(res, 2000 * (attempt + 1)));
     }
     if (!response.ok){
       let detail = '';
@@ -661,29 +665,30 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     const textual = new RegExp('(\\d{1,2})\\s*\\.?\\s*((?:' + monthAlt + ')(?:\\.|(?=[^\\p{L}]|$))?)(?:\\s*\\.?\\s*)(\\d{2,4})', 'iu');
     const numeric = /(?<!\d)(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})(?!\d)/;
     const iso = /(?<!\d)(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})(?!\d)/;
-    for (const raw of lines){
-      const line = stripThaiMarks(normalizeDigits(raw))
-        .replace(/([\u0E00-\u0E7F.])\s+(?=[\u0E00-\u0E7F.])/g, '$1') // spaced-out Thai glyphs
-        .replace(/([\u0E00-\u0E7F])\./g, '$1'); // ส.ค. -> สค
-      let m = line.match(iso);
-      if (m){
-        const r = isoDate(fullYear(m[1], thaiContext), +m[2], +m[3]);
-        if (r) return r;
-      }
-      m = line.match(textual);
-      if (m){
-        const key = m[2].toLowerCase().replace(/\./g,'');
-        const mo = MONTH_LOOKUP[key];
-        const r = mo && isoDate(fullYear(m[3], thaiContext), mo, +m[1]);
-        if (r) return r;
-      }
-      m = line.match(numeric);
-      if (m){
-        let d = +m[1], mo = +m[2];
-        if (mo > 12 && d <= 12){ [d, mo] = [mo, d]; } // unambiguous US-style
-        const r = isoDate(fullYear(m[3], thaiContext), mo, d);
-        if (r) return r;
-      }
+    const cleaned = lines.map(raw => stripThaiMarks(normalizeDigits(raw))
+      .replace(/([\u0E00-\u0E7F.])\s+(?=[\u0E00-\u0E7F.])/g, '$1') // spaced-out Thai glyphs
+      .replace(/([\u0E00-\u0E7F])\./g, '$1')); // ส.ค. -> สค
+    // 1) day + month name + year, 2) ISO, 3) numeric d/m/y
+    for (const line of cleaned){
+      const m = line.match(textual);
+      if (!m) continue;
+      const mo = MONTH_LOOKUP[m[2].toLowerCase().replace(/\./g, '')];
+      const r = mo && isoDate(fullYear(m[3], thaiContext), mo, +m[1]);
+      if (r) return r;
+    }
+    for (const line of cleaned){
+      const m = line.match(iso);
+      if (!m) continue;
+      const r = isoDate(fullYear(m[1], thaiContext), +m[2], +m[3]);
+      if (r) return r;
+    }
+    for (const line of cleaned){
+      const m = line.match(numeric);
+      if (!m) continue;
+      let d = +m[1], mo = +m[2];
+      if (mo > 12 && d <= 12){ [d, mo] = [mo, d]; } // unambiguous US-style
+      const r = isoDate(fullYear(m[3], thaiContext), mo, d);
+      if (r) return r;
     }
     return '';
   }
@@ -828,10 +833,12 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
       description = (isTransfer ? 'Bank transfer' : 'Receipt') + ' ref ' + ref;
     }
     if (isTransfer){
-      const names = lines.filter(l => /^\s*(น\.?\s?ส\.?|นาย|นาง|นางสาว|บจก\.?|บริษัท|หจก\.?)\s*\S/.test(l));
+      const titled = /(?<![\u0E00-\u0E7F])(น\.?\s?ส\.?|นาย|นาง|นางสาว|บจก\.?|บริษัท|หจก\.?)\s*[\u0E01-\u0E5B]\S*.*$/;
+      const names = lines.map(l => (l.match(titled) || [''])[0].trim()).filter(Boolean);
       const recipient = names[1] || names[0] || '';
-      if (recipient) vendor = recipient.trim();
+      if (recipient) vendor = recipient;
     }
+    if (!/\p{L}{3,}/u.test(vendor)) vendor = ''; // icons and symbols are not a vendor name
     const category = guessCategory(vendor, description);
     const vat = extractVAT(lines, total);
     const currency = extractCurrency(text);
