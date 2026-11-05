@@ -126,12 +126,12 @@
       <label>OCR language pack</label>
       <select id="ocrLangSelect">
         <option value="eng">English only (fastest)</option>
-        <option value="eng+fra" selected>English + French</option>
+        <option value="eng+fra">English + French</option>
         <option value="eng+spa">English + Spanish</option>
         <option value="eng+deu">English + German</option>
         <option value="eng+ita">English + Italian</option>
         <option value="eng+por">English + Portuguese</option>
-        <option value="tha+eng">Thai + English</option>
+        <option value="tha+eng" selected>Thai + English</option>
         <option value="eng+fra+spa+deu">English + French + Spanish + German</option>
       </select>
 
@@ -231,6 +231,13 @@
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
   const ocrLangSelect = document.getElementById('ocrLangSelect');
+  try {
+    const savedLang = localStorage.getItem('p2l_ocrLang');
+    if (savedLang && [...ocrLangSelect.options].some(o => o.value === savedLang)) ocrLangSelect.value = savedLang;
+  } catch (_e) { /* storage unavailable: keep the default */ }
+  ocrLangSelect.addEventListener('change', () => {
+    try { localStorage.setItem('p2l_ocrLang', ocrLangSelect.value); } catch (_e) {}
+  });
   const apiKeyInput = document.getElementById('apiKeyInput');
   const aiModelInput = document.getElementById('aiModelInput');
   const testKeyBtn = document.getElementById('testKeyBtn');
@@ -570,6 +577,9 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     return '';
   }
 
+  // drop Thai marks OCR likes to add or lose; keep ิ and ี because they tell มิ.ย. / มี.ค. apart from ม.ค.
+  function stripThaiMarks(str){ return str.replace(/[\u0E31\u0E36-\u0E3A\u0E47-\u0E4E]/g, ''); }
+
   const MONTHS = {
     en: ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'],
     fr: ['janv','févr','fevr','mars','avr','mai','juin','juil','août','aout','sept','oct','nov','déc','dec']
@@ -584,7 +594,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
       ['มกราคม','มค'],['กุมภาพันธ์','กพ'],['มีนาคม','มีค'],['เมษายน','เมย'],['พฤษภาคม','พค'],['มิถุนายน','มิย'],
       ['กรกฎาคม','กค'],['สิงหาคม','สค'],['กันยายน','กย'],['ตุลาคม','ตค'],['พฤศจิกายน','พย'],['ธันวาคม','ธค']
     ];
-    th.forEach(([full, ab], i) => { m[full] = i+1; m[ab] = i+1; });
+    th.forEach(([full, ab], i) => { m[stripThaiMarks(full)] = i+1; m[stripThaiMarks(ab)] = i+1; });
     return m;
   })();
 
@@ -613,7 +623,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     const numeric = /(?<!\d)(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{2,4})(?!\d)/;
     const iso = /(?<!\d)(\d{4})\s*-\s*(\d{1,2})\s*-\s*(\d{1,2})(?!\d)/;
     for (const raw of lines){
-      const line = normalizeDigits(raw)
+      const line = stripThaiMarks(normalizeDigits(raw))
         .replace(/([\u0E00-\u0E7F.])\s+(?=[\u0E00-\u0E7F.])/g, '$1') // spaced-out Thai glyphs
         .replace(/([\u0E00-\u0E7F])\./g, '$1'); // ส.ค. -> สค
       let m = line.match(iso);
@@ -763,7 +773,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
 
   function parseReceipt(text){
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
-    const vendor = extractVendor(lines);
+    let vendor = extractVendor(lines);
     const date = extractDate(lines);
     const total = extractTotal(lines);
     let description = extractDescription(lines, vendor);
@@ -771,6 +781,11 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
     const isTransfer = /โอนเงิน|transfer/i.test(text);
     if (ref && (isTransfer || !description || /เลขที่|อ้างอิง|\bref|reference|item number/i.test(description))){
       description = (isTransfer ? 'Bank transfer' : 'Receipt') + ' ref ' + ref;
+    }
+    if (isTransfer){
+      const names = lines.filter(l => /^\s*(น\.?\s?ส\.?|นาย|นาง|นางสาว|บจก\.?|บริษัท|หจก\.?)\s*\S/.test(l));
+      const recipient = names[1] || names[0] || '';
+      if (recipient) vendor = recipient.trim();
     }
     const category = guessCategory(vendor, description);
     const vat = extractVAT(lines, total);
