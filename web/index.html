@@ -159,6 +159,12 @@
         <option value="th">Thai</option>
       </select>
 
+      <label>Date year style</label>
+      <select id="yearStyleSelect">
+        <option value="be" selected>Thai Buddhist Era (2569)</option>
+        <option value="ce">Gregorian (2026)</option>
+      </select>
+
       <label>Gemini API key <span style="font-weight:400;color:var(--ink-soft);">(optional: entering a key switches AI on. Free key at aistudio.google.com)</span></label>
       <input type="password" id="apiKeyInput" placeholder="AIza..." style="width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:1px;font-size:13.5px;background:var(--paper);color:var(--ink);font-family:'IBM Plex Mono',monospace;">
       <label>Model <span style="font-weight:400;color:var(--ink-soft);">(optional, leave empty for the default)</span></label>
@@ -232,6 +238,25 @@
   const settingsModal = document.getElementById('settingsModal');
   const closeSettingsBtn = document.getElementById('closeSettingsBtn');
   const ocrLangSelect = document.getElementById('ocrLangSelect');
+  const yearStyleSelect = document.getElementById('yearStyleSelect');
+  // dates are read as YYYY-MM-DD (Gregorian) and shown with the year style chosen in Settings
+  function applyYearStyle(d){
+    const m = /^(\d{4})-(\d{2}-\d{2})$/.exec(d || '');
+    if (!m) return d || '';
+    let y = +m[1];
+    if (yearStyleSelect.value === 'be' && y < 2400) y += 543;
+    if (yearStyleSelect.value === 'ce' && y > 2400) y -= 543;
+    return y + '-' + m[2];
+  }
+  try {
+    const savedYear = localStorage.getItem('p2l_yearStyle');
+    if (savedYear === 'be' || savedYear === 'ce') yearStyleSelect.value = savedYear;
+  } catch (_e) { /* storage unavailable: keep the default */ }
+  yearStyleSelect.addEventListener('change', () => {
+    try { localStorage.setItem('p2l_yearStyle', yearStyleSelect.value); } catch (_e) {}
+    items.forEach(it => { it.date = applyYearStyle(it.date); });
+    render();
+  });
   try {
     const savedLang = localStorage.getItem('p2l_ocrLang');
     if (savedLang && [...ocrLangSelect.options].some(o => o.value === savedLang)) ocrLangSelect.value = savedLang;
@@ -528,7 +553,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
 
   function applyAiResult(it, result){
     if (result.vendor) it.vendor = result.vendor;
-    if (result.date) it.date = result.date;
+    if (result.date) it.date = applyYearStyle(result.date);
     if (result.description) it.description = result.description;
     if (result.category && CATEGORY_OPTIONS.includes(result.category)) it.category = result.category;
     if (typeof result.total === 'number') it.total = result.total.toFixed(2);
@@ -1157,7 +1182,7 @@ For bank transfer slips (e.g. โอนเงินสำเร็จ / transfer
         // baseline: fast local parsing, so fields are never blank even if AI is unreachable
         const baseline = parseReceipt(it.rawText);
         it.vendor = baseline.vendor;
-        it.date = baseline.date;
+        it.date = applyYearStyle(baseline.date);
         it.description = baseline.description;
         it.category = baseline.category;
         it.total = baseline.total !== null ? baseline.total.toFixed(2) : '';
